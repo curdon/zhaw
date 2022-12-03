@@ -1,0 +1,162 @@
+---
+title: "Rangsummentest von Wilcoxon in R"
+author: "Curdin Derungs"
+date: "Winter 2022"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    theme: paper
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Installieren der Packages -> muss nur beim ersten Mal un-kommentiert und ausgeführt werden
+#install.packages("datarium")
+#install.packages("ggplot2")
+#install.packages("knitr")
+
+## Laden der nötigen Packages
+library(ggplot2)
+library(knitr)
+library(datarium)
+```
+
+## Ziel
+Theoretische Grundlagen und Anwendungsfälle des Wilcoxon Rangsummentest (RST) wurden im Rahmen der Probevorlesung bereits erläutert. In diesem Dokument wird der Wilcoxon Rangsummentest für gepaarte Stichproben anhand von R-Code erläutert. Der Einstichprobenfall wurde bereits in der Vorlesung erläutert.
+
+## Beispieldaten
+Wir nützen den mice2 Datensatz, welcher von R im 'datarium' Package zur Verfügung gestellt wird. Bei 10 Mäusen wurde das Gewicht vor und nach einer 'Behandlung' (mehr erfahren wir leider nicht) gemessen. Es handelt sich also um gepaarte Stichproben, d.h. das Gewicht jeder Maus wurde zwei Mal gemessen.
+
+```{r read data, echo=TRUE, message=FALSE, warning=FALSE}
+## Daten lesen
+data("mice2", package = "datarium")
+
+## Tabelle auspielen
+kable(mice2[1:3,], caption="Die ersten Zeilen des mice2 Datensatzes")
+```
+
+Uns interessiert vor allem die Verteilung des Gewichtsunterschiedes (nachher - vorher, d.h. positive Werte bedeuten Gewichtszunahme). Wir berechnen diesen im Folgenden und visualisieren in als Histogram.  
+
+```{r viz data, echo=TRUE, fig.height=4, fig.width=8, message=FALSE, warning=FALSE}
+## Differenzen berechnen
+mice2$diff <-  mice2$after - mice2$before
+
+## Differenzen als Histogram darstellen
+ggplot(mice2)+
+  geom_histogram(aes(x=diff), bins = 5, alpha = 0.7, fill = 'orange')+
+  ylab("Anzahl Differenzen")+
+  xlab("Differenz Gewicht (Nachher - Vorher)")+
+  theme_minimal()
+```
+
+Beobachtung:
+
+* Die 10 Differenzen enthalten keine Ausreisser.  
+* Die Differenzen sind ziemlich symetrisch um den Wert 195 verteilt.  
+* Es kommen keine Differenzen mit Wert 0 vor.  
+
+Die Voraussetzungen für den Wilcoxon RST sind erfüllt. Wenn wir mehr Beobachtungen hätten, könnten wir auch einen T-Test in Erwägung ziehen.
+
+## 'Manueller' Test
+Wie bereits im Unterricht anhand des Einstrichprbenfalles besprochen, wählen wir folgendes Vorgehen:
+
+* Definition der Hypothesen
+* Berechnen der Differenzen (-> bereits gemacht!)
+* Rangieren der Differenzen
+* Summieren der Differenzen
+
+### Hypothesen
+In Worten lautet unsere Nullhypothese: *Es gibt keinen Unterschied im Gewicht der Mäuse vor und nach der Behandlung*
+
+In Notation sieht das so aus: $H_{0}: Median_{diff} = 0; \sum(+)Rng = \sum(-)Rng$
+
+Obwohl wir nichts über den Versuch wissen, sehen wir, dass das Experiment eine Gewichtszunahme der Mäuse bewirkt hat (die Differenzen sind positiv). Daher formulieren wir folgende Alternativhypothese: $H_{A}: Median_{diff} > 0; \sum(+)Rng > \sum(-)Rng$
+
+### Rangieren der Diffrenzen
+Die bereits berechneten Differenzen müssen anhand der absoluten Werte in eine Rangordnung gebracht werden.
+
+```{r rank data, echo=TRUE, message=FALSE, warning=FALSE}
+## Differenzen von 0 müssen aus der Berechnung herausgenommen werden (gibt es in diesem Beispiel nicht)
+mice2$diff[mice2$diff == 0] <- NA
+
+## Rangieren der absoluten Differenzen
+mice2$rank <- rank(abs(mice2$diff), na.last = 'keep')
+
+## Tabelle auspielen
+kable(mice2[1:3,], caption="Differenzen und Ränge des mice2 Datensatzes")
+```
+
+### Summieren der Differenzen
+Die positiven und negativen Differenzen müssen summiert werden.
+
+```{r sum ranks, echo=TRUE, fig.height=1, fig.width=8, message=FALSE, warning=FALSE}
+## Erwartete Ranksumme
+V_exp <- sum(mice2$rank, na.rm = T) / 2
+
+## Positive Ranksumme
+V_pos <- sum(mice2$rank[mice2$diff > 0], na.rm = T)
+
+## Netative Ranksumme
+V_neg <- sum(mice2$rank[mice2$diff < 0], na.rm = T)
+
+## Visualisieren der Rangsummen
+ggplot() +
+  geom_vline(xintercept = V_neg, color = 'blue', size = 2) +
+  geom_vline(xintercept = V_exp, color = 'black', size = 2) +
+  geom_vline(xintercept = V_pos, color = 'red', size = 2)+
+  xlab("Rangsummen")+
+  theme_light()
+```
+Im Wilcoxon RST werden wir also den Erwartungswert $V_{exp} =$ `r V_exp` mit dem beobachten Wert $V = max(V_{neg};V_{pos}) = V_{pos} =$ `r V_pos` vergleichen. In diesem Fall ist der Unterschied maximal gross, da alle Differenzen positiv sind.  
+
+Die Teststatistik sieht dann folgendermassen aus: $\frac{V - V_{exp}}{\delta_{v}}$
+
+Wie bereits in der Vorlesung erwähnt, werden wir nicht näher auf den Standardfehler von $V$, d.h. $\delta_{v}$, eingehen. Dieser ist etwas kompliziert herzuleiten.
+
+## R-Funktion
+Und endlich lernen Sie, wie man den Wilcoxon RST für gepaarte Stichproben in R berechnet. Dazu benützen wir die R-Function `wilcox.test`.
+
+Dazu müssen wir noch ein Problem ansprechen. In der mice2 Tabelle sind die Gewichtsmessungen vor und nach der Behandlung in zwei unterschiedlichen Spalten gespeichert. Unter dieser Voraussetzung steht uns kein direkter Weg offen, um den paarweisen Test mit diesen Daten zu berechnen. Wir müssen eine von zwei Alternativen wählen:
+
+### Alternative 1: Einstichprobenfall mit den Differenzen
+
+Wir können der Funktion die Differenzen zwischen vorher und nachher übergeben (nämlich `mice2$diff`), zusammen mit dem Erwartungswert unter $H_{0}: Median_{diff} = 0$. Den Erwartungswert überbeben wir dem Parameter `mu`. Als Alternativhypothese haben wir oben gesagt, dass wir nur einseitig, nämlich `'greater'` testen möchten.
+
+```{r wilcoxon, echo=TRUE, message=FALSE, warning=FALSE}
+## Wilcoxon RST berechnen
+wilcox.test(mice2$diff, mu=0, alternative = 'greater')
+```
+
+
+### Alternative 2: Gepaarte Stichprobe mit transformierter Tabelle
+Die zweite Alternative besteht darin, eine neue Tabelle zu erstellen und vom breiten Format in ein langes Format zu wechseln (d.h. wide-to-long Transformation, Details [hier](http://www.cookbook-r.com/Manipulating_data/Converting_data_between_wide_and_long_format/)). 
+
+Die erste Spalte gibt Auskunft über den Zeitpunkt der Gewichtsmessung, nämlich 'vorher' oder 'nachher'. In der zweiten Spalte stehen die Gewichtsmessungen. Die beiden Spalten können der Funktion mit einer Tilde getrennt übergeben werden: `mice2_long$weight ~ mice2_long$treatment`. Zudem muss nun der Parameter `paired = TRUE` gesetzt werden.
+
+```{r wilcoxon2, echo=TRUE, message=FALSE, warning=FALSE}
+## Wide to long
+mice2_long <- data.frame(
+  treatment = c(rep("vorher", nrow(mice2)), rep("nachher", nrow(mice2))),
+  weight = c(mice2$before, mice2$after)
+  )
+
+wilcox.test(mice2_long$weight ~ mice2_long$treatment, alternative = 'greater', paired = TRUE)
+```
+
+
+## Interpretation
+
+Beobachtungen:  
+
+* Die beiden Alternativen, um den Wilkoxon RST für gepaarte Stichproben zu berechnen ergeben das gleiche Resultat.
+* Die beobachtete Ranksumme $V$ im R-Output entspricht der 'manuel' berechneten Ranksumme.  
+* Die beobachtete Ranksumme ist unter Annahme von $H_{0}$ sehr unwahrscheinlich. Der P-Wert ist deutlich tiefer als das Signifikanzniveau 0.05.
+
+### Resultat in Worten
+
+* In natürlicher Sprache: Wir können die Nullhypothese, dass es keinen Unterschied im Gewicht der Mäuse vor und nach der Behandlung gibt verwerfen.    
+* Im Statistik-Lingo: Ein Wilcoxon Ranksummentest für gepaarte Stichproben zeigt, dass das Gewicht der Mäuse vor der Behandlung ($V_{neg} = 0$) signifikant tiefer ist als nach der Behandlung ($V_{pos} = 55$) mit p < 0.05.
+
