@@ -1,0 +1,226 @@
+---
+title: "Rangsummentest von Wilcoxon in R"
+author: "Curdin Derungs"
+date: "Winter 2022"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: paper
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Installieren der Packages -> muss nur beim ersten Mal un-kommentiert und ausgeführt werden
+#install.packages("ggplot2")
+#install.packages("knitr")
+#install.packages("reshape2")
+
+## Laden der nötigen Packages
+library(ggplot2)
+library(knitr)
+library(reshape2)
+```
+
+## Ziel
+
+Theoretische Grundlagen und Anwendungsfälle des Wilcoxon Rangsummentest (RST) wurden im Rahmen der Probevorlesung bereits erläutert. In diesem Dokument wird der Wilcoxon RST für einfache und gepaarte Stichproben anhand von R-Code berechnet.
+
+## Einfachstichprobenfall
+
+### Hypothese
+
+Wir möchten untersuchen, ob die Student:innen Statistik mögen oder nicht. Dazu testen wir die Nullhypothese *Den Student:innen ist Statistik egal*.
+
+Für den Wilcoxon RST bedeutet dies:
+
+-   $H_{0}: \sum(+)Rng = \sum(-)Rng$ (ein positiver Rang bedeutet eine Präferenz \> 5)
+-   $H_{A}: \sum(+)Rng > \sum(-)Rng$ (einseitiger Test)
+
+### Daten
+
+Die Daten 'erstellen' wir selbst:
+
+```{r read data, echo=TRUE, fig.height=3, fig.width=8, message=FALSE, warning=FALSE}
+dat <- data.frame(id = 1:10, praeferenz = c(4,5,8,3,6,8,6,3,2,7))
+
+ggplot(dat)+
+  geom_histogram(aes(x=praeferenz), bins = 11)+
+  geom_vline(xintercept = 5, color="grey20", linetype=2)+
+  scale_x_continuous(limits = c(0,10), n.breaks = 10)+
+  theme_light()
+```
+
+### 'Manueller' Test
+
+Wie bereits im Unterricht anhand des Einstichprobenfalles besprochen, wählen wir folgendes Vorgehen:
+
+-   Berechnen der Differenzen
+-   Rangieren der Differenzen
+-   Summieren der Differenzen
+
+In einem ersten Schritt werden die Differenzen berechnet und daraus die Ränge hergeleitet. Eine positive Differenz bedeutet, die Präferenz grösser als 5 ist.
+
+```{r rank data, echo=TRUE, message=FALSE, warning=FALSE}
+## Differenzen zum Erwartungswert = 5 berechnen
+dat$diff <- dat$praeferenz - 5
+
+## Differenzen von 0 müssen aus der Berechnung herausgenommen werden (gibt es in diesem Beispiel nicht)
+dat$diff[dat$diff == 0] <- NA
+
+## Rangieren der absoluten Differenzen
+dat$rank <- rank(abs(dat$diff), na.last = 'keep')
+
+## Tabelle auspielen
+kable(dat, caption="Differenzen und Ränge")
+```
+
+Die Ränge werden dann separat für die positiven und negativen Abweichungen vom Erwartungswert summiert:
+
+```{r sum ranks, echo=TRUE, fig.height=1, fig.width=8, message=FALSE, warning=FALSE}
+## Erwartete Ranksumme
+V_exp <- sum(dat$rank, na.rm = T) / 2
+
+## Positive Ranksumme
+V_pos <- sum(dat$rank[dat$diff > 0], na.rm = T)
+
+## Netative Ranksumme
+V_neg <- sum(dat$rank[dat$diff < 0], na.rm = T)
+
+V <- max(c(V_pos,V_neg))
+```
+
+Folgende Rangsummen resultieren aus den Beispieldaten:
+
+-   $V_{exp} =$ `r V_exp`
+-   $V_{pos} =$ `r V_pos`
+-   $V_{neg} =$ `r V_neg`
+-   $V = max(V_{neg};V_{pos}) = V_{pos} =$ `r V`
+
+Die Teststatistik sieht folgendermassen aus:\
+$z = \frac{V - V_{exp}}{\delta_{v}}$
+
+Wie bereits in der Vorlesung erwähnt, werden wir nicht näher auf den Standardfehler von $V$, d.h. $\delta_{v}$, eingehen. Dieser ist etwas kompliziert herzuleiten.
+
+### R-Funktion
+
+Und endlich lernen Sie, wie man den Wilcoxon RST für den Einfachstichprobenfall in R berechnet. Dazu benützen wir die R-Funktion `wilcox.test`.
+
+Wir können der Funktion die Präferenz, zusammen mit einem `mu`-Parameter übergeben. Wir verwenden den Erwartungswert der Nullhypothese und setzen `mu = 5`. Die Alternativhypothese möchten wir einseitig testen, nämlich `alternative = 'greater'`. Wir sind daran interessiert zu zeigen, dass die Präferenzen der Student:innen in positive Richtung von der Nullhypothese abweichen.
+
+Der Test ergibt dann folgenden Output:
+
+```{r wilcoxon, echo=TRUE, message=FALSE, warning=FALSE}
+## Wilcoxon RST berechnen
+wilcox.test(dat$praeferenz, mu=5, alternative = 'greater')
+```
+
+### Interpretation
+
+Beobachtung:
+
+-   Die beobachtete Rangsumme $V = 25$ im R-Output entspricht der 'manuell' berechneten Rangsumme.\
+-   Die beobachtete Rangsumme ist unter Annahme von $H_{0}$ ziemlich wahrscheinlich. Der P-Wert liegt bei 0.4 und ist damit deutlich grösser als ein Signifikanzniveau von 0.05.
+
+Die $H_0$, dass Student:innen Statistik egal ist, kann nicht verworfen werden.
+
+## Gepaarte Stichproben
+
+### Hypothese
+
+Wir möchten nun testen, ob sich die Präferenzen, welche anfangs Probelektion erhoben wurden, durch die Lektion verändert haben. Die Nullhypothese lautet, dass *die Präferenzen am Anfang und am Ende der Probelektion unverändert sind*.
+
+Für den Wilcoxon RST bedeutet dies:
+
+-   $H_{0}: \sum(+)Rng = \sum(-)Rng$ (ein positiver Rang bedeutet eine höhere Präferenz Ende Probelektion)
+-   $H_{A}: \sum(+)Rng > \sum(-)Rng$ (einseitiger Test)
+
+### Daten
+
+Wir fügen den Präferenzen, welche zu Beginn erhoben wurden, noch eine zweite Serie Präferenzen hinzu. Für jede Student:in haben wir nun zwei Messungen, eine zu Beginn des Unterrichts und eine am Ende. Es handelt sich also um gepaarte Stichproben.
+
+```{r create data paired, echo=TRUE, fig.height=3, fig.width=8, message=FALSE, warning=FALSE}
+## Daten lesen
+dat_paired <- data.frame(id = dat$id, praeferenz_vorher = dat$praeferenz)
+
+dat_paired$praeferenz_ende <- c(6,5,8,6,4,7,6,2,5,7)
+
+dat_long <- melt(dat_paired, id.vars=c("id"))
+ggplot(dat_long) +
+  geom_point(aes(x = variable, y = value)) +
+  geom_line(aes(x  = variable, y = value, group = id))+
+  ylab("Präferenz")+
+  xlab("")+
+  theme_minimal()
+```
+
+### 'Manueller' Test
+
+Wir wählen das gleiche Vorgehen wie bei dem Einstichprobenfall:
+
+-   Berechnen der Differenzen
+-   Rangieren der Differenzen
+-   Summieren der Differenzen
+
+In einem ersten Schritt werden die Differenzen berechnet und daraus die Ränge hergeleitet. Die Differenzen werden nun zwischen den Präferenzen anfangs und am Ende der Lektion berechnet. Ein positiver Wert bedeutet, dass sich die Präferenz erhöht hat.
+
+```{r rank data paired, echo=TRUE, message=FALSE, warning=FALSE}
+## Differenzen zum Erwartungswert = 5 berechnen
+dat_paired$diff <-  dat_paired$praeferenz_ende - dat_paired$praeferenz_vorher
+
+## Differenzen von 0 müssen aus der Berechnung herausgenommen werden (gibt es in diesem Beispiel nicht)
+dat_paired$diff[dat_paired$diff == 0] <- NA
+
+## Rangieren der absoluten Differenzen
+dat_paired$rank <- rank(abs(dat_paired$diff), na.last = 'keep')
+
+## Tabelle auspielen
+kable(dat_paired, caption="Differenzen und Ränge")
+```
+
+Die Ränge werden dann separat für die positiven und negativen Abweichungen vom Erwartungswert summiert:
+
+```{r sum ranks paired, echo=TRUE, fig.height=1, fig.width=8, message=FALSE, warning=FALSE}
+## Erwartete Ranksumme
+V_exp <- sum(dat_paired$rank, na.rm = T) / 2
+
+## Positive Ranksumme
+V_pos <- sum(dat_paired$rank[dat_paired$diff > 0], na.rm = T)
+
+## Netative Ranksumme
+V_neg <- sum(dat_paired$rank[dat_paired$diff < 0], na.rm = T)
+
+V <- max(c(V_pos,V_neg))
+```
+
+Folgende Rangsummen resultieren aus den Beispieldaten:
+
+-   $V_{exp} =$ `r V_exp`
+-   $V_{pos} =$ `r V_pos`
+-   $V_{neg} =$ `r V_neg`
+-   $V = max(V_{neg};V_{pos}) = V_{pos} =$ `r V`
+
+Die Teststatistik sieht folgendermassen aus:\
+$z = \frac{V - V_{exp}}{\delta_{v}}$
+
+### R-Funktion
+
+Die `wilcox.test` Funktion wird ähnlich wie im Einstichprobenfall verwendet. Nun übergeben wir der Funktion zwei Messreihen. ACHTUNG: Wenn wir `alternative = 'greater'` definieren, dann müssen wir als erste Messreihe diejenige angeben, welche wir als grösser testen möchten! Zudem müssen wir `paired = TRUE` definieren, damit ein paarweiser Test ausgeführt wird.
+
+Der Test ergibt dann folgenden Output:
+
+```{r wilcoxon paired, echo=TRUE, message=FALSE, warning=FALSE}
+## Wilcoxon RST berechnen
+wilcox.test(dat_paired$praeferenz_ende,dat_paired$praeferenz_vorher, paired = TRUE, alternative = 'greater')
+```
+
+### Interpretation
+
+Beobachtung:
+
+-   Die beobachtete Ranksumme $V = 14.5$ im R-Output entspricht der 'manuell' berechneten Ranksumme.\
+-   Die beobachtete Ranksumme ist unter Annahme von $H_{0}$ wiederum recht wahrscheinlich. Der P-Wert liegt bei 0.22 und ist damit deutlich grösser als ein Signifikanzniveau von 0.05.
+
+Die $H_0$, dass sich die Einstellung zur Statistik während der Probelektion verändert hat, kann nicht verworfen werden.
